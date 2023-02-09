@@ -137,6 +137,7 @@ dependencies = [
  "crossbeam-channel",
  "crossterm",
  "tui",
+ "unicode-width",
 ]
 
 [[package]]

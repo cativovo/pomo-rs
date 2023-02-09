@@ -1,5 +1,8 @@
-use crate::Utils;
+use crossterm::event::KeyCode;
+
 use std::time::Duration;
+
+use crate::utils;
 
 #[derive(Clone)]
 pub enum AppEvent {
@@ -9,24 +12,34 @@ pub enum AppEvent {
     Toggle,
 }
 
+#[derive(Clone)]
+pub enum AppStatus {
+    Running, // TODO better variable name
+    Paused,
+    Quit,
+}
+
 impl AppEvent {
-    pub fn from_char(input: char) -> Utils::MyResult<AppEvent> {
-        match input {
-            'q' => Ok(AppEvent::Quit),
-            ' ' => Ok(AppEvent::Toggle),
-            's' => Ok(AppEvent::Stop),
+    pub fn from_keycode(keycode: KeyCode) -> utils::MyResult<AppEvent> {
+        match keycode {
+            KeyCode::Char(char) => match char {
+                'q' => Ok(AppEvent::Quit),
+                ' ' => Ok(AppEvent::Toggle),
+                's' => Ok(AppEvent::Stop),
+                _ => Ok(AppEvent::None),
+            },
             _ => Ok(AppEvent::None),
         }
     }
 }
 
+#[derive(Clone)]
 pub struct App {
     work_duration: u64,  // in seconds
     break_duration: u64, // in seconds
     progress: u64,       // in seconds
     is_working: bool,
-    pub is_running: bool,
-    pub should_quit: bool,
+    status: AppStatus,
 }
 
 impl App {
@@ -35,16 +48,19 @@ impl App {
             work_duration,
             break_duration,
             progress: work_duration,
-            is_running: true,
             is_working: true,
-            should_quit: false,
+            status: AppStatus::Running,
         }
     }
 
     fn update_progress(&mut self) {
-        if self.is_running && self.progress > 0 {
+        if matches!(self.status, AppStatus::Running) && self.progress > 0 {
             self.progress -= 1;
-        } else if self.progress == 0 {
+        }
+
+        if self.progress == 0 {
+            self.status = AppStatus::Paused;
+
             if self.is_working {
                 // start break timer
                 self.progress = self.break_duration;
@@ -58,7 +74,11 @@ impl App {
     }
 
     fn toggle(&mut self) {
-        self.is_running = !self.is_running
+        if matches!(self.status, AppStatus::Running) {
+            self.status = AppStatus::Paused;
+        } else {
+            self.status = AppStatus::Running;
+        }
     }
 
     pub fn on_tick(&mut self) {
@@ -66,7 +86,7 @@ impl App {
     }
 
     fn stop(&mut self) {
-        self.is_running = false;
+        self.status = AppStatus::Paused;
         self.progress = self.work_duration;
     }
 
@@ -88,10 +108,14 @@ impl App {
         self.break_duration = secs;
     }
 
+    pub fn get_status(&self) -> AppStatus {
+        self.status.clone()
+    }
+
     pub fn on(&mut self, event: AppEvent) {
         match event {
             AppEvent::Quit => {
-                self.should_quit = true;
+                self.status = AppStatus::Quit;
             }
             AppEvent::Toggle => {
                 self.toggle();
