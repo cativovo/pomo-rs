@@ -1,6 +1,6 @@
 use crate::{
     app::{App, AppEvent, AppStatus},
-    utils::MyResult,
+    utils::{format_secs, to_secs, MyResult},
 };
 use crossterm::{
     cursor,
@@ -50,57 +50,66 @@ impl InputFocus {
     }
 }
 
-enum UiMode {
+pub enum UiMode {
     Normal,
     EditingWork,
     EditingBreak,
 }
 
 impl UiMode {
+    fn to_usize(ui_mode: &UiMode) -> usize {
+        match ui_mode {
+            UiMode::EditingWork | UiMode::Normal => 0,
+            UiMode::EditingBreak => 1,
+        }
+    }
+
     pub fn from_keycode(keycode: &KeyCode) -> Option<UiMode> {
         match keycode {
             KeyCode::Esc => return Some(UiMode::Normal),
             KeyCode::Char(char) => match char {
-                'b' => return Some(UiMode::EditingWork),
-                'w' => return Some(UiMode::EditingBreak),
-                _ => (),
+                'w' => return Some(UiMode::EditingWork),
+                'b' => return Some(UiMode::EditingBreak),
+                _ => None,
             },
-            _ => (),
+            _ => None,
         }
-
-        None
     }
 }
 
 pub struct Ui<'a> {
     title: &'a str,
     stdout: Stdout,
-    input: String,
+    inputs: [[String; 3]; 2], //[work time, break time] hours, minutes, seconds
     mode: UiMode,
-    input_focus: usize,
-    input_titles: [&'a str; 3],
+    tab_focus: usize,
+    input_titles: [&'a str; 3], // hours, minutes, seconds
 }
 
 impl<'a> Ui<'a> {
-    fn next(&mut self) {
-        self.input_focus = (self.input_focus + 1) % self.input_titles.len();
+    fn next_tab(&mut self) {
+        self.tab_focus = (self.tab_focus + 1) % self.input_titles.len();
     }
 
-    fn prev(&mut self) {
-        if self.input_focus > 0 {
-            self.input_focus -= 1;
+    fn prev_tab(&mut self) {
+        if self.tab_focus > 0 {
+            self.tab_focus -= 1;
         } else {
-            self.input_focus = self.input_titles.len() - 1;
+            self.tab_focus = self.input_titles.len() - 1;
         }
+    }
+
+    fn set_initial_tab_focus(&mut self) {
+        self.tab_focus = 0;
     }
 
     fn select_tab(&mut self, keycode: &KeyCode) {
         match keycode {
             KeyCode::Tab => {
-                self.next();
+                self.next_tab();
             }
             KeyCode::BackTab => {
-                self.prev();
+                self.prev_tab();
             }
             _ => (),
         };
@@ -108,21 +117,42 @@ impl<'a> Ui<'a> {
 
     fn set_input(&mut self, c: char) {
         if c.is_numeric() {
-            self.input.push(c);
+            let tab_focus = self.tab_focus;
+
+            if tab_focus == 1 || tab_focus == 2 {
+                let mut input_clone = self.get_input().clone();
+                input_clone.push(c);
+
+                let duration: u64 = input_clone.parse().unwrap_or(0);
+
+                if duration < 60 {
+                    self.inputs[UiMode::to_usize(&self.mode)][self.tab_focus].push(c);
+                }
+            } else {
+                self.inputs[UiMode::to_usize(&self.mode)][self.tab_focus].push(c);
+            }
         }
     }
 
     fn delete_input(&mut self) {
-        self.input.pop();
+        self.inputs[UiMode::to_usize(&self.mode)][self.tab_focus].pop();
     }
 
-    pub fn new(title: &'a str, input_titles: [&'a str; 3]) -> Ui<'a> {
+    fn get_input(&self) -> String {
+        self.inputs[UiMode::to_usize(&self.mode)][self.tab_focus].clone()
+    }
+
+    fn get_inputs(&self) -> [String; 3] {
+        self.inputs[UiMode::to_usize(&self.mode)].clone()
+    }
+
+    pub fn new(title: &'a str, input_titles: [&'a str; 3], inputs: [[String; 3]; 2]) -> Ui<'a> {
         Ui {
             title,
             stdout: io::stdout(),
-            input: String::new(),
+            inputs,
             mode: UiMode::Normal,
-            input_focus: 0,
+            tab_focus: 0,
             input_titles,
         }
     }
@@ -159,6 +189,8 @@ impl<'a> Ui<'a> {
 
     fn render_input(&self, frame: &mut Frame<CrosstermBackend<Stdout>>) {
         let mut size = frame.size().clone();
+        let selected = self.tab_focus;
+        let selected_title = self.input_titles[selected];
         size.width = size.width / 2;
         size.x = size.width / 2;
         size.height = (size.height as f64 * 0.35).floor() as u16;
@@ -168,7 +200,6 @@ impl<'a> Ui<'a> {
             .margin(5)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
             .split(size);
-
         let titles = self
             .input_titles
             .iter()
@@ -180,9 +211,6 @@ impl<'a> Ui<'a> {
                 ])
             })
             .collect();
-
-        let selected = self.input_focus;
-
         let tabs = Tabs::new(titles)
             .block(Block::default().borders(Borders::ALL).title("Tabs"))
             .select(selected)
@@ -192,19 +220,27 @@ impl<'a> Ui<'a> {
                     .add_modifier(Modifier::BOLD)
                     .bg(Color::Black),
             );
-        frame.render_widget(tabs, chunks[0]);
+        let input = self.get_input();
+        let time = input.parse::<u64>().unwrap_or(0);
+        let time = {
+            if time > 0 {
+                time.to_string()
+            } else {
+                "".to_string()
+            }
+        };
+        let time = time.as_str();
 
-        let selected_title = self.input_titles[selected];
-        let input = self.input.as_str();
-        let paragraph = Paragraph::new(input)
+        let paragraph = Paragraph::new(time)
             .style(Style::default())
             .block(Block::default().borders(Borders::ALL).title(selected_title));
 
+        frame.render_widget(tabs, chunks[0]);
         frame.render_widget(paragraph, chunks[1]);
         // Make the cursor visible and ask tui-rs to put it at the specified coordinates after rendering
         frame.set_cursor(
             // Put cursor past the end of the input text
-            chunks[1].x + UnicodeWidthStr::width(input) as u16 + 1,
+            chunks[1].x + UnicodeWidthStr::width(time) as u16 + 1,
             // Move one line down, from the border to the input line
             chunks[1].y + 1,
         );
@@ -240,6 +276,7 @@ impl<'a> Ui<'a> {
 
             if !matches!(self.mode, UiMode::Normal) {
                 self.select_tab(&keycode);
+                app.stop();
 
                 match keycode {
                     KeyCode::Char(c) => {
@@ -250,6 +287,25 @@ impl<'a> Ui<'a> {
                     }
                     _ => (),
                 }
+
+                let [hours, minutes, secs] =
+                    self.get_inputs().map(|e| e.parse::<u64>().unwrap_or(0));
+                let secs = to_secs(hours, minutes, secs);
+
+                match self.mode {
+                    UiMode::EditingWork => {
+                        app.set_work_duration(secs);
+                    }
+                    UiMode::EditingBreak => {
+                        app.set_break_duration(secs);
+                    }
+                    _ => (),
+                }
+            }
+
+            // reset tab focus
+            if matches!(keycode, KeyCode::Esc) {
+                self.set_initial_tab_focus()
             }
 
             let event = AppEvent::from_keycode(keycode)?;

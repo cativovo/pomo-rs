@@ -2,7 +2,7 @@ use crossterm::event::KeyCode;
 
 use std::time::Duration;
 
-use crate::utils;
+use crate::utils::{format_secs, MyResult};
 
 #[derive(Clone)]
 pub enum AppEvent {
@@ -20,7 +20,7 @@ pub enum AppStatus {
 }
 
 impl AppEvent {
-    pub fn from_keycode(keycode: KeyCode) -> utils::MyResult<AppEvent> {
+    pub fn from_keycode(keycode: KeyCode) -> MyResult<AppEvent> {
         match keycode {
             KeyCode::Char(char) => match char {
                 'q' => Ok(AppEvent::Quit),
@@ -81,22 +81,28 @@ impl App {
         }
     }
 
-    pub fn on_tick(&mut self) {
-        self.update_progress();
-    }
-
-    fn stop(&mut self) {
+    pub fn stop(&mut self) {
         self.status = AppStatus::Paused;
         self.progress = self.work_duration;
     }
 
+    pub fn on_tick(&mut self) {
+        self.update_progress();
+    }
+
     pub fn get_progress(&self) -> String {
         let duration = Duration::from_secs(self.progress);
-        let hours = duration.as_secs() / 3600;
-        let minutes = (duration.as_secs() % 3600) / 60;
-        let seconds = duration.as_secs() % 60;
+        let [hours, minutes, seconds] = format_secs(duration.as_secs());
 
         format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    }
+
+    pub fn get_work_duration(&self) -> u64 {
+        self.work_duration
+    }
+
+    pub fn get_break_duration(&self) -> u64 {
+        self.break_duration
     }
 
     pub fn set_work_duration(&mut self, secs: u64) {

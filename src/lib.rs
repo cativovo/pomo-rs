@@ -10,14 +10,23 @@ use std::{
 };
 use tui::{backend::CrosstermBackend, Terminal};
 use ui::Ui;
-use utils::MyResult;
+use utils::{format_secs, MyResult};
 
 pub fn start() -> MyResult<()> {
     let stdout = io::stdout();
     let mut app = App::new(5, 3);
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let mut ui = Ui::new("Pomodoro", ["Hours", "Minutes", "Seconds"]);
+    let work_time = format_secs(app.get_work_duration());
+    let break_time = format_secs(app.get_break_duration());
+    let mut ui = Ui::new(
+        "Pomodoro",
+        ["Hours", "Minutes", "Seconds"],
+        [
+            work_time.map(|e| e.to_string()),
+            break_time.map(|e| e.to_string()),
+        ],
+    );
     ui.setup_terminal()?;
 
     let tick_rate = Duration::from_secs(1);
