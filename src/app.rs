@@ -53,7 +53,10 @@ impl App {
         }
     }
 
-    fn update_progress(&mut self) {
+    fn update_progress<F>(&mut self, mut f: F)
+    where
+        F: FnMut(bool),
+    {
         if matches!(self.status, AppStatus::Running) && self.progress > 0 {
             self.progress -= 1;
         }
@@ -65,10 +68,12 @@ impl App {
                 // start break timer
                 self.progress = self.break_duration;
                 self.is_working = false;
+                f(true);
             } else {
                 // start work timer
                 self.progress = self.work_duration;
                 self.is_working = true;
+                f(false);
             }
         }
     }
@@ -86,8 +91,11 @@ impl App {
         self.progress = self.work_duration;
     }
 
-    pub fn on_tick(&mut self) {
-        self.update_progress();
+    pub fn on_tick<F>(&mut self, f: F)
+    where
+        F: FnMut(bool),
+    {
+        self.update_progress(f);
     }
 
     pub fn get_progress(&self) -> String {

@@ -1,4 +1,5 @@
 mod app;
+mod notification;
 mod ui;
 mod utils;
 
@@ -11,6 +12,8 @@ use std::{
 use tui::{backend::CrosstermBackend, Terminal};
 use ui::Ui;
 use utils::{format_secs, MyResult};
+
+use crate::notification::Notification;
 
 pub fn start() -> MyResult<()> {
     let stdout = io::stdout();
@@ -31,6 +34,7 @@ pub fn start() -> MyResult<()> {
 
     let tick_rate = Duration::from_secs(1);
     let mut last_tick = Instant::now();
+    let mut notification = Notification::new();
 
     loop {
         ui.draw(&mut terminal, &mut app)?;
@@ -45,7 +49,13 @@ pub fn start() -> MyResult<()> {
         };
 
         if last_tick.elapsed() >= tick_rate {
-            app.on_tick();
+            app.on_tick(|b| {
+                if b {
+                    notification.notify_break();
+                } else {
+                    notification.notify_work();
+                }
+            });
             last_tick = Instant::now();
         }
 
