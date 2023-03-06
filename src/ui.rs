@@ -14,7 +14,7 @@ use tui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, Borders, Gauge, Paragraph, Tabs},
+    widgets::{Block, Borders, Gauge, Paragraph, Tabs, Wrap},
     Frame, Terminal,
 };
 use unicode_width::UnicodeWidthStr;
@@ -37,7 +37,7 @@ impl UiMode {
 
     pub fn from_keycode(keycode: &KeyCode) -> Option<UiMode> {
         match keycode {
-            KeyCode::Esc => return Some(UiMode::Normal),
+            KeyCode::Esc | KeyCode::Enter => return Some(UiMode::Normal),
             KeyCode::Char(char) => match char {
                 'w' => return Some(UiMode::EditingWork),
                 'b' => return Some(UiMode::EditingBreak),
@@ -275,6 +275,33 @@ impl<'a> Ui<'a> {
         );
     }
 
+    fn render_help(&self, frame: &mut Frame<CrosstermBackend<Stdout>>) {
+        let mut text = vec![
+            Span::raw("[q] Quit| "),
+            Span::raw("[w] Set work time| "),
+            Span::raw("[b] Set break time| "),
+            Span::raw("[Space] Start/Pause"),
+        ];
+
+        if !matches!(self.mode, UiMode::Normal) {
+            text = vec![
+                Span::raw(" [Esc/Enter] Close| "),
+                Span::raw("[Tab] Next| "),
+                Span::raw("[Shift-Tab] Previous"),
+            ];
+        };
+
+        let paragraph = Paragraph::new(Spans::from(text));
+
+        let mut paragraph_size = frame.size().clone();
+        paragraph_size.height = paragraph_size.height / 12;
+        paragraph_size.width = paragraph_size.width - 5;
+        paragraph_size.y = frame.size().height - paragraph_size.height;
+        paragraph_size.x = 2;
+
+        frame.render_widget(paragraph, paragraph_size);
+    }
+
     pub fn draw(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
@@ -307,6 +334,8 @@ impl<'a> Ui<'a> {
                 app.get_formatted_progress(),
                 matches!(app.get_status(), AppStatus::Paused),
             );
+
+            self.render_help(frame);
 
             if !matches!(self.mode, UiMode::Normal) {
                 self.render_input(frame);
@@ -354,15 +383,15 @@ impl<'a> Ui<'a> {
                     }
                     _ => (),
                 }
+
+                // reset tab focus
+                if matches!(keycode, KeyCode::Esc) {
+                    app.set_is_working(true);
+                    self.set_initial_tab_focus();
+                }
             } else {
                 let event = AppEvent::from_keycode(keycode)?;
                 app.on(event);
-            }
-
-            // reset tab focus
-            if matches!(keycode, KeyCode::Esc) {
-                app.set_is_working(true);
-                self.set_initial_tab_focus();
             }
         }
 
