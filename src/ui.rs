@@ -1,6 +1,6 @@
 use crate::{
     app::{App, AppEvent, AppStatus},
-    utils::{format_secs, to_secs, MyResult},
+    utils::{get_percentage, to_secs, MyResult},
 };
 use crossterm::{
     cursor,
@@ -11,44 +11,15 @@ use crossterm::{
 use std::io::{self, Stdout};
 use tui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, Borders, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Gauge, Paragraph, Tabs},
     Frame, Terminal,
 };
 use unicode_width::UnicodeWidthStr;
 
-enum InputFocus {
-    Hours,
-    Minutes,
-    Seconds,
-}
-
-impl InputFocus {
-    fn from_usize(index: usize) -> InputFocus {
-        match index {
-            0 => InputFocus::Hours,
-            1 => InputFocus::Minutes,
-            2 => InputFocus::Seconds,
-            _ => {
-                if index > 2 {
-                    InputFocus::Hours
-                } else {
-                    InputFocus::Seconds
-                }
-            }
-        }
-    }
-
-    fn to_usize(input_focus: &InputFocus) -> usize {
-        match input_focus {
-            InputFocus::Hours => 0,
-            InputFocus::Minutes => 1,
-            InputFocus::Seconds => 2,
-        }
-    }
-}
+const BORDERS: [Borders; 4] = [Borders::TOP, Borders::RIGHT, Borders::BOTTOM, Borders::LEFT];
 
 pub enum UiMode {
     Normal,
@@ -84,6 +55,7 @@ pub struct Ui<'a> {
     mode: UiMode,
     tab_focus: usize,
     input_titles: [&'a str; 3], // hours, minutes, seconds
+    border_pos: usize,
 }
 
 impl<'a> Ui<'a> {
@@ -134,6 +106,18 @@ impl<'a> Ui<'a> {
         }
     }
 
+    fn update_border_pos(&mut self, value: Option<usize>) {
+        if let Some(value) = value {
+            self.border_pos = value;
+        } else {
+            if self.border_pos >= 3 {
+                self.border_pos = 0;
+            } else {
+                self.border_pos += 1;
+            }
+        }
+    }
+
     fn delete_input(&mut self) {
         self.inputs[UiMode::to_usize(&self.mode)][self.tab_focus].pop();
     }
@@ -154,6 +138,7 @@ impl<'a> Ui<'a> {
             mode: UiMode::Normal,
             tab_focus: 0,
             input_titles,
+            border_pos: 0,
         }
     }
 
@@ -172,19 +157,63 @@ impl<'a> Ui<'a> {
         Ok(())
     }
 
-    fn render_timer(&self, frame: &mut Frame<CrosstermBackend<Stdout>>, progress: String) {
-        let mut size = frame.size().clone();
-        let paragraph = Paragraph::new(Span::raw(progress))
-            .style(Style::default().fg(Color::White))
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL))
-            .wrap(Wrap { trim: true });
-        size.width = size.width / 2;
-        size.height = size.height / 2;
-        size.x = size.width / 2;
-        size.y = size.height / 2;
+    fn render_gauge(
+        &self,
+        frame: &mut Frame<CrosstermBackend<Stdout>>,
+        title: &str,
+        progress_percent: u16,
+    ) {
+        let mut gauge_size = frame.size().clone();
+        gauge_size.height = gauge_size.height / 8;
+        gauge_size.width = gauge_size.width / 6;
+        gauge_size.x = (frame.size().width / 2) - (gauge_size.width / 2);
+        gauge_size.y = (frame.size().height / 2) - (gauge_size.height / 2);
 
-        frame.render_widget(paragraph, size);
+        let gauge = Gauge::default()
+            .block(Block::default().title(title).borders(Borders::ALL))
+            .gauge_style(Style::default().fg(Color::Yellow))
+            .percent(progress_percent);
+
+        frame.render_widget(gauge, gauge_size);
+    }
+
+    fn render_timer(
+        &mut self,
+        frame: &mut Frame<CrosstermBackend<Stdout>>,
+        formatted_progress: String,
+        show_all_borders: bool,
+    ) {
+        let mut block_size = frame.size().clone();
+        let border = if show_all_borders {
+            self.update_border_pos(Some(0));
+
+            Borders::ALL
+        } else {
+            let border = BORDERS[self.border_pos];
+            self.update_border_pos(None);
+
+            border
+        };
+        let block = Block::default().borders(border);
+
+        block_size.width = block_size.width / 2;
+        block_size.height = block_size.height / 2;
+        block_size.x = block_size.width / 2;
+        block_size.y = block_size.height / 2;
+
+        frame.render_widget(block, block_size);
+
+        let paragraph = Paragraph::new(Span::raw(formatted_progress))
+            .style(Style::default().fg(Color::White))
+            .alignment(Alignment::Center);
+
+        let mut paragraph_size = block_size.clone();
+        paragraph_size.height = paragraph_size.height / 2;
+        paragraph_size.width = paragraph_size.width / 2;
+        paragraph_size.x = (paragraph_size.width * 2) - (paragraph_size.width / 2);
+        paragraph_size.y = (paragraph_size.height * 2) - (paragraph_size.height / 2);
+
+        frame.render_widget(paragraph, paragraph_size);
     }
 
     fn render_input(&self, frame: &mut Frame<CrosstermBackend<Stdout>>) {
@@ -212,7 +241,7 @@ impl<'a> Ui<'a> {
             })
             .collect();
         let tabs = Tabs::new(titles)
-            .block(Block::default().borders(Borders::ALL).title("Tabs"))
+            .block(Block::default().borders(Borders::ALL))
             .select(selected)
             .style(Style::default().fg(Color::Cyan))
             .highlight_style(
@@ -247,7 +276,7 @@ impl<'a> Ui<'a> {
     }
 
     pub fn draw(
-        &self,
+        &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         app: &mut App,
     ) -> MyResult<()> {
@@ -255,7 +284,29 @@ impl<'a> Ui<'a> {
             let block = Block::default().title(self.title).borders(Borders::ALL);
 
             frame.render_widget(block, frame.size());
-            self.render_timer(frame, app.get_progress());
+
+            let title;
+            let max;
+
+            if app.get_is_working() {
+                title = "Work time";
+                max = app.get_work_duration();
+            } else {
+                title = "Break time";
+                max = app.get_break_duration();
+            };
+
+            self.render_gauge(
+                frame,
+                title,
+                get_percentage(max - app.get_progress_secs(), max),
+            );
+
+            self.render_timer(
+                frame,
+                app.get_formatted_progress(),
+                matches!(app.get_status(), AppStatus::Paused),
+            );
 
             if !matches!(self.mode, UiMode::Normal) {
                 self.render_input(frame);
@@ -294,22 +345,25 @@ impl<'a> Ui<'a> {
 
                 match self.mode {
                     UiMode::EditingWork => {
+                        app.set_is_working(true);
                         app.set_work_duration(secs);
                     }
                     UiMode::EditingBreak => {
+                        app.set_is_working(false);
                         app.set_break_duration(secs);
                     }
                     _ => (),
                 }
+            } else {
+                let event = AppEvent::from_keycode(keycode)?;
+                app.on(event);
             }
 
             // reset tab focus
             if matches!(keycode, KeyCode::Esc) {
-                self.set_initial_tab_focus()
+                app.set_is_working(true);
+                self.set_initial_tab_focus();
             }
-
-            let event = AppEvent::from_keycode(keycode)?;
-            app.on(event);
         }
 
         Ok(())

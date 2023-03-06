@@ -1,7 +1,5 @@
 use crossterm::event::KeyCode;
 
-use std::time::Duration;
-
 use crate::utils::{format_secs, MyResult};
 
 #[derive(Clone)]
@@ -62,8 +60,6 @@ impl App {
         }
 
         if self.progress == 0 {
-            self.status = AppStatus::Paused;
-
             if self.is_working {
                 // start break timer
                 self.progress = self.break_duration;
@@ -75,6 +71,8 @@ impl App {
                 self.is_working = true;
                 f(false);
             }
+
+            self.status = AppStatus::Paused;
         }
     }
 
@@ -88,6 +86,7 @@ impl App {
 
     pub fn stop(&mut self) {
         self.status = AppStatus::Paused;
+        self.is_working = true;
         self.progress = self.work_duration;
     }
 
@@ -98,11 +97,14 @@ impl App {
         self.update_progress(f);
     }
 
-    pub fn get_progress(&self) -> String {
-        let duration = Duration::from_secs(self.progress);
-        let [hours, minutes, seconds] = format_secs(duration.as_secs());
+    pub fn get_formatted_progress(&self) -> String {
+        let [hours, minutes, seconds] = format_secs(self.progress);
 
         format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    }
+
+    pub fn get_progress_secs(&self) -> u64 {
+        self.progress
     }
 
     pub fn get_work_duration(&self) -> u64 {
@@ -124,6 +126,20 @@ impl App {
 
     pub fn get_status(&self) -> AppStatus {
         self.status.clone()
+    }
+
+    pub fn get_is_working(&self) -> bool {
+        self.is_working
+    }
+
+    pub fn set_is_working(&mut self, v: bool) {
+        self.is_working = v;
+
+        if v {
+            self.progress = self.work_duration;
+        } else {
+            self.progress = self.break_duration;
+        }
     }
 
     pub fn on(&mut self, event: AppEvent) {
